@@ -1,0 +1,8 @@
+ipykernel
+paramiko
+numpy
+scipy
+pandas
+matplotlib
+lxml
+dotenv
