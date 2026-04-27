@@ -108,7 +108,7 @@ def asix_to_compact_dict(
     - keep_all_attributes=True: keep all attributes under _attrs (with t/v/u remapped)
     """
 
-    def convert(el: etree._Element, extra_attributes: bool = False) -> dict[str, Any]:
+    def convert(el: etree._Element) -> dict[str, Any]:
         node: dict[str, Any] = {}
 
         # Attributes
@@ -122,10 +122,7 @@ def asix_to_compact_dict(
             attrs_dict["value"] = _cast_value(attrs_dict.get("type"), attrs_dict.get("value"))
 
         if attrs_dict:
-            if extra_attributes:
-                node[ATTRS_KEY] = attrs_dict
-            else:
-                node.update(attrs_dict)
+            node[ATTRS_KEY] = attrs_dict
 
         # Children grouped by tag
         groups: dict[str, list[dict[str, Any]]] = {}

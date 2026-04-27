@@ -114,6 +114,30 @@ def parse_firem_header(raw_header: str, rules: dict) -> dict:
 # Generic ASIX utilities
 # -----------------------------
 
+def _node_attrs(node: Any) -> Dict[str, Any]:
+    if not isinstance(node, dict):
+        return {}
+    attrs = node.get("_attrs")
+    return attrs if isinstance(attrs, dict) else {}
+
+
+def _get_node_value(node: Any, *keys: str) -> Any:
+    if not isinstance(node, dict):
+        return None
+
+    for key in keys:
+        value = node.get(key)
+        if value is not None:
+            return value
+
+    attrs = _node_attrs(node)
+    for key in keys:
+        value = attrs.get(key)
+        if value is not None:
+            return value
+
+    return None
+
 def _walk(obj: Any, path: Tuple[Any, ...] = ()) -> Iterable[Tuple[Tuple[Any, ...], Any]]:
     yield path, obj
     if isinstance(obj, dict):
@@ -127,7 +151,7 @@ def _walk(obj: Any, path: Tuple[Any, ...] = ()) -> Iterable[Tuple[Tuple[Any, ...
 def _extract_name(node: Any) -> Optional[str]:
     if isinstance(node, dict):
         for key in ("name", "Name", "@name", "_name", "id", "ID"):
-            value = node.get(key)
+            value = _get_node_value(node, key)
             if isinstance(value, str) and value.strip():
                 return value.strip()
     return None
@@ -142,7 +166,7 @@ def _extract_material_name(node: Any) -> Optional[str]:
         "mat_name", "material_id", "MaterialID", "phase_material_name"
     ]
     for key in candidate_keys:
-        value = node.get(key)
+        value = _get_node_value(node, key)
         if isinstance(value, str) and value.strip():
             return value.strip()
 
@@ -161,7 +185,7 @@ def _extract_aggregate_state(node: Any) -> Optional[str]:
         "aggregate_state", "AggregateState", "phase_state", "state"
     ]
     for key in candidate_keys:
-        value = node.get(key)
+        value = _get_node_value(node, key)
         if isinstance(value, str) and value.strip():
             return value.strip().lower()
 
@@ -247,8 +271,9 @@ def build_domain_lookup_from_asix(asix_dict: dict) -> Dict[str, Dict[str, Any]]:
 
         entry: Dict[str, Any] = {}
         for key in ("component", "domain", "side", "selection_type", "region_type"):
-            if key in node and isinstance(node[key], str):
-                entry[key] = node[key]
+            value = _get_node_value(node, key)
+            if isinstance(value, str):
+                entry[key] = value
         material_name = _extract_material_name(node)
         if material_name:
             entry["material_name"] = material_name
