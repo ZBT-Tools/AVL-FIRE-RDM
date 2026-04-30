@@ -8,3 +8,7 @@ lxml
 dotenv
 pyyaml
 requests
+pyvista
+meshio
+h5py
+plotly
