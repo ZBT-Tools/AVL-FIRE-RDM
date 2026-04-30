@@ -14,9 +14,7 @@ from src import utils
 
 
 DEFAULT_REMOTE_DATA_DIRECTORY = "results/3D_EnSight"
-DEFAULT_LOCAL_DOWNLOAD_DIR = 
 DEFAULT_OUTPUT_DIR = "3D_Converted"
-ENSIGHT_CASE_NAME
 
 
 def main() -> int:
