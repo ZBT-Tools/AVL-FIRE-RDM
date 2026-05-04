@@ -1,0 +1,13 @@
+numpy
+pandas
+scipy
+lxml
+paramiko
+python-dotenv
+PyYAML
+requests
+pyvista
+meshio
+h5py
+matplotlib
+plotly
