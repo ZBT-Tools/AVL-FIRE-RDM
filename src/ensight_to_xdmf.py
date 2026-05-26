@@ -58,7 +58,9 @@ def inspect_ensight_case(case_file: str | Path) -> dict:
     time_values: list[float] = []
     point_fields: list[str] = []
     cell_fields: list[str] = []
-    variable_re = re.compile(r"^(scalar|vector|tensor)\s+per\s+(node|element):\s+\d+\s+(.+?)\s+\*+")
+    variable_re = re.compile(
+        r"^(scalar|vector|tensor)\s+per\s+(node|element):\s+\d+\s+(.+?)\s+\*+"
+    )
 
     section = None
     lines = case_path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -102,7 +104,9 @@ def inspect_ensight_case(case_file: str | Path) -> dict:
     }
 
 
-def convert_ensight_case(config: EnsightConversionConfig) -> dict:
+def convert_ensight_case(
+    config: EnsightConversionConfig, get_last_time: bool = True
+) -> dict:
     """
     Convert an EnSight case to an XDMF/HDF5 time series.
 
@@ -128,8 +132,10 @@ def convert_ensight_case(config: EnsightConversionConfig) -> dict:
 
     reader = pv.get_reader(str(case_file))
     all_time_values = list(_read_time_values(reader))
-    selected_time_indices = _normalize_time_indices(config.time_indices, len(all_time_values))
-
+    selected_time_indices = _normalize_time_indices(
+        config.time_indices, len(all_time_values)
+    )
+    last_time_index = selected_time_indices[-1]
     initial_dataset = _read_dataset_at(reader, selected_time_indices[0])
     mesh, _ = _dataset_to_meshio(
         initial_dataset,
@@ -141,19 +147,31 @@ def convert_ensight_case(config: EnsightConversionConfig) -> dict:
     hdf5_path = output_dir / "fields.h5"
     with meshio.xdmf.TimeSeriesWriter(str(xdmf_path)) as writer:
         writer.write_points_cells(mesh.points, mesh.cells)
-
-        for time_index in selected_time_indices:
-            dataset = _read_dataset_at(reader, time_index)
+        if get_last_time:
+            dataset = _read_dataset_at(reader, last_time_index)
             mesh_at_time, _ = _dataset_to_meshio(
                 dataset,
                 point_fields=config.point_fields,
                 cell_fields=config.cell_fields,
             )
             writer.write_data(
-                all_time_values[time_index],
+                all_time_values[last_time_index],
                 point_data=mesh_at_time.point_data,
                 cell_data=mesh_at_time.cell_data,
             )
+        else:
+            for time_index in selected_time_indices:
+                dataset = _read_dataset_at(reader, time_index)
+                mesh_at_time, _ = _dataset_to_meshio(
+                    dataset,
+                    point_fields=config.point_fields,
+                    cell_fields=config.cell_fields,
+                )
+                writer.write_data(
+                    all_time_values[time_index],
+                    point_data=mesh_at_time.point_data,
+                    cell_data=mesh_at_time.cell_data,
+                )
 
     generated_hdf5_path = Path.cwd() / hdf5_path.name
     if generated_hdf5_path != hdf5_path and generated_hdf5_path.exists():
@@ -206,7 +224,9 @@ def _read_time_values(reader) -> Sequence[float]:
     return values or [0.0]
 
 
-def _normalize_time_indices(time_indices: Optional[Sequence[int]], n_times: int) -> list[int]:
+def _normalize_time_indices(
+    time_indices: Optional[Sequence[int]], n_times: int
+) -> list[int]:
     if n_times < 1:
         return [0]
     if time_indices is None:
@@ -256,20 +276,28 @@ def _dataset_to_meshio(dataset, point_fields=None, cell_fields=None):
 
     selected_point_fields = _select_fields(dataset.point_data.keys(), point_fields)
     point_data = {
-        name: np.asarray(dataset.point_data[name])
-        for name in selected_point_fields
+        name: np.asarray(dataset.point_data[name]) for name in selected_point_fields
     }
 
     selected_cell_fields = _select_fields(dataset.cell_data.keys(), cell_fields)
     cell_data = {
-        name: _split_cell_data_by_block(np.asarray(dataset.cell_data[name]), cell_indices)
+        name: _split_cell_data_by_block(
+            np.asarray(dataset.cell_data[name]), cell_indices
+        )
         for name in selected_cell_fields
     }
 
-    return meshio.Mesh(points=points, cells=cells, point_data=point_data, cell_data=cell_data), cell_indices
+    return (
+        meshio.Mesh(
+            points=points, cells=cells, point_data=point_data, cell_data=cell_data
+        ),
+        cell_indices,
+    )
 
 
-def _select_fields(available_fields: Iterable[str], requested_fields: Optional[Sequence[str]]) -> list[str]:
+def _select_fields(
+    available_fields: Iterable[str], requested_fields: Optional[Sequence[str]]
+) -> list[str]:
     available = list(available_fields)
     if requested_fields is None:
         return available
@@ -281,14 +309,20 @@ def _select_fields(available_fields: Iterable[str], requested_fields: Optional[S
     return requested
 
 
-def _extract_meshio_cells(dataset) -> tuple[list[tuple[str, np.ndarray]], list[np.ndarray]]:
+def _extract_meshio_cells(
+    dataset,
+) -> tuple[list[tuple[str, np.ndarray]], list[np.ndarray]]:
     cells = np.asarray(dataset.cells)
     connectivity = np.asarray(getattr(dataset, "cell_connectivity", []))
     offsets = np.asarray(dataset.offset)
     cell_types = np.asarray(dataset.celltypes)
     n_cells = int(len(cell_types))
 
-    if len(connectivity) and len(offsets) == n_cells + 1 and int(offsets[-1]) == len(connectivity):
+    if (
+        len(connectivity)
+        and len(offsets) == n_cells + 1
+        and int(offsets[-1]) == len(connectivity)
+    ):
         starts = offsets[:-1]
         ends = offsets[1:]
         connectivity_source = connectivity
@@ -319,7 +353,7 @@ def _extract_meshio_cells(dataset) -> tuple[list[tuple[str, np.ndarray]], list[n
         cell = connectivity_source[start:end]
         if uses_legacy_cells:
             n_points = int(cell[0])
-            cell_connectivity = np.asarray(cell[1:1 + n_points], dtype=int)
+            cell_connectivity = np.asarray(cell[1 : 1 + n_points], dtype=int)
         else:
             cell_connectivity = np.asarray(cell, dtype=int)
 
@@ -335,11 +369,12 @@ def _extract_meshio_cells(dataset) -> tuple[list[tuple[str, np.ndarray]], list[n
         for cell_type, connectivity_rows in blocks.items()
     ]
     index_blocks = [
-        np.asarray(indices, dtype=int)
-        for indices in block_indices.values()
+        np.asarray(indices, dtype=int) for indices in block_indices.values()
     ]
     return cell_blocks, index_blocks
 
 
-def _split_cell_data_by_block(cell_data: np.ndarray, cell_indices: Sequence[np.ndarray]) -> list[np.ndarray]:
+def _split_cell_data_by_block(
+    cell_data: np.ndarray, cell_indices: Sequence[np.ndarray]
+) -> list[np.ndarray]:
     return [cell_data[indices] for indices in cell_indices]
