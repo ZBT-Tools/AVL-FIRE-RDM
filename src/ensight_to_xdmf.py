@@ -137,7 +137,7 @@ def convert_ensight_case(
     )
 
     if only_last_time:
-        selected_time_indices = all_time_indices[-2:-1]
+        selected_time_indices = all_time_indices[-1:]
     else:
         selected_time_indices = all_time_indices
 
@@ -160,7 +160,7 @@ def convert_ensight_case(
                 cell_fields=config.cell_fields,
             )
             writer.write_data(
-                selected_time_indices[time_index],
+                all_time_values[time_index],
                 point_data=mesh_at_time.point_data,
                 cell_data=mesh_at_time.cell_data,
             )
@@ -177,7 +177,7 @@ def convert_ensight_case(
             "xdmf": str(xdmf_path),
             "hdf5": str(hdf5_path),
         },
-        "time_values": [selected_time_indices[i] for i in selected_time_indices],
+        "time_values": [all_time_values[i] for i in selected_time_indices],
         "point_fields": sorted(mesh.point_data),
         "cell_fields": sorted(mesh.cell_data),
         "mesh": {
@@ -241,18 +241,25 @@ def _read_dataset_at(reader, time_index: int):
         reader.set_active_time_value(reader.time_values[time_index])
 
     dataset = reader.read()
-    return _coerce_unstructured_grid(dataset)
+    return _coerce_dataset(dataset)
 
 
-def _coerce_unstructured_grid(dataset):
+def _coerce_dataset(dataset):
     if isinstance(dataset, pv.MultiBlock):
-        blocks = [block for block in dataset if block is not None and block.n_cells > 0]
+        blocks = [_coerce_unstructured_grid(block) for block in dataset if block is not None and block.n_cells > 0]
         if not blocks:
             raise ValueError("EnSight reader returned an empty multiblock dataset")
         if len(blocks) == 1:
             dataset = blocks[0]
         else:
-            dataset = dataset.combine()
+            dataset = pv.MultiBlock(blocks)
+
+    return _coerce_unstructured_grid(dataset)
+
+
+def _coerce_unstructured_grid(dataset):
+    if isinstance(dataset, pv.MultiBlock):
+        return dataset
 
     if isinstance(dataset, pv.PolyData):
         dataset = dataset.cast_to_unstructured_grid()
@@ -263,10 +270,20 @@ def _coerce_unstructured_grid(dataset):
 
 
 def _dataset_to_meshio(dataset, point_fields=None, cell_fields=None):
+    if isinstance(dataset, pv.MultiBlock):
+        return _multiblock_to_meshio(dataset, point_fields=point_fields, cell_fields=cell_fields)
+
+    return _unstructured_grid_to_meshio(
+        dataset,
+        point_fields=point_fields,
+        cell_fields=cell_fields,
+    )
+
+
+def _unstructured_grid_to_meshio(dataset, point_fields=None, cell_fields=None):
     points = np.asarray(dataset.points)
     cells, cell_indices = _extract_meshio_cells(dataset)
 
-    keys = dataset.point_data.keys()
     selected_point_fields = _select_fields(dataset.point_data.keys(), point_fields)
     point_data = {
         name: np.asarray(dataset.point_data[name]) for name in selected_point_fields
@@ -286,6 +303,84 @@ def _dataset_to_meshio(dataset, point_fields=None, cell_fields=None):
         ),
         cell_indices,
     )
+
+
+def _multiblock_to_meshio(dataset, point_fields=None, cell_fields=None):
+    blocks = [_coerce_unstructured_grid(block) for block in dataset if block is not None and block.n_cells > 0]
+    combined = dataset.combine(merge_points=False)
+    points = np.asarray(combined.points)
+    cells, cell_indices = _extract_meshio_cells(combined)
+
+    point_data = _merge_multiblock_field_data(
+        blocks,
+        association="point",
+        requested_fields=point_fields,
+    )
+    cell_data_flat = _merge_multiblock_field_data(
+        blocks,
+        association="cell",
+        requested_fields=cell_fields,
+    )
+    cell_data = {
+        name: _split_cell_data_by_block(values, cell_indices)
+        for name, values in cell_data_flat.items()
+    }
+
+    return (
+        meshio.Mesh(
+            points=points,
+            cells=cells,
+            point_data=point_data,
+            cell_data=cell_data,
+        ),
+        cell_indices,
+    )
+
+
+def _merge_multiblock_field_data(blocks, association: str, requested_fields=None):
+    if association == "point":
+        data_sets = [block.point_data for block in blocks]
+        lengths = [block.n_points for block in blocks]
+    elif association == "cell":
+        data_sets = [block.cell_data for block in blocks]
+        lengths = [block.n_cells for block in blocks]
+    else:
+        raise ValueError(f"unsupported field association: {association}")
+
+    available_fields = _ordered_union(data.keys() for data in data_sets)
+    selected_fields = _select_fields(available_fields, requested_fields)
+
+    merged = {}
+    for name in selected_fields:
+        exemplar = next(np.asarray(data[name]) for data in data_sets if name in data)
+        fill_dtype = exemplar.dtype
+        if not np.issubdtype(fill_dtype, np.floating):
+            fill_dtype = np.result_type(fill_dtype, np.float32)
+
+        pieces = []
+        for data, length in zip(data_sets, lengths):
+            if name in data:
+                pieces.append(np.asarray(data[name]))
+                continue
+
+            shape = (length, *exemplar.shape[1:])
+            pieces.append(np.full(shape, np.nan, dtype=fill_dtype))
+
+        merged[name] = np.concatenate(pieces, axis=0)
+
+    return merged
+
+
+def _ordered_union(field_groups: Iterable[Iterable[str]]) -> list[str]:
+    ordered = []
+    seen = set()
+    for group in field_groups:
+        for name in group:
+            if name in seen:
+                continue
+            seen.add(name)
+            ordered.append(name)
+    return ordered
 
 
 def _select_fields(
