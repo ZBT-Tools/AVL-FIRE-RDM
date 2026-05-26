@@ -160,7 +160,7 @@ def convert_ensight_case(
                 cell_fields=config.cell_fields,
             )
             writer.write_data(
-                all_time_values[time_index],
+                selected_time_indices[time_index],
                 point_data=mesh_at_time.point_data,
                 cell_data=mesh_at_time.cell_data,
             )
@@ -177,7 +177,7 @@ def convert_ensight_case(
             "xdmf": str(xdmf_path),
             "hdf5": str(hdf5_path),
         },
-        "time_values": [all_time_values[i] for i in all_time_indices],
+        "time_values": [selected_time_indices[i] for i in selected_time_indices],
         "point_fields": sorted(mesh.point_data),
         "cell_fields": sorted(mesh.cell_data),
         "mesh": {
