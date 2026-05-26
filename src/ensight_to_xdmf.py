@@ -105,7 +105,7 @@ def inspect_ensight_case(case_file: str | Path) -> dict:
 
 
 def convert_ensight_case(
-    config: EnsightConversionConfig, get_last_time: bool = True
+    config: EnsightConversionConfig, only_last_time: bool = True
 ) -> dict:
     """
     Convert an EnSight case to an XDMF/HDF5 time series.
@@ -132,11 +132,16 @@ def convert_ensight_case(
 
     reader = pv.get_reader(str(case_file))
     all_time_values = list(_read_time_values(reader))
-    selected_time_indices = _normalize_time_indices(
+    all_time_indices = _normalize_time_indices(
         config.time_indices, len(all_time_values)
     )
-    last_time_index = selected_time_indices[-1]
-    initial_dataset = _read_dataset_at(reader, selected_time_indices[0])
+
+    if only_last_time:
+        selected_time_indices = all_time_indices[-2:-1]
+    else:
+        selected_time_indices = all_time_indices
+
+    initial_dataset = _read_dataset_at(reader, all_time_indices[0])
     mesh, _ = _dataset_to_meshio(
         initial_dataset,
         point_fields=config.point_fields,
@@ -147,31 +152,18 @@ def convert_ensight_case(
     hdf5_path = output_dir / "fields.h5"
     with meshio.xdmf.TimeSeriesWriter(str(xdmf_path)) as writer:
         writer.write_points_cells(mesh.points, mesh.cells)
-        if get_last_time:
-            dataset = _read_dataset_at(reader, last_time_index)
+        for time_index in selected_time_indices:
+            dataset = _read_dataset_at(reader, time_index)
             mesh_at_time, _ = _dataset_to_meshio(
                 dataset,
                 point_fields=config.point_fields,
                 cell_fields=config.cell_fields,
             )
             writer.write_data(
-                all_time_values[last_time_index],
+                all_time_values[time_index],
                 point_data=mesh_at_time.point_data,
                 cell_data=mesh_at_time.cell_data,
             )
-        else:
-            for time_index in selected_time_indices:
-                dataset = _read_dataset_at(reader, time_index)
-                mesh_at_time, _ = _dataset_to_meshio(
-                    dataset,
-                    point_fields=config.point_fields,
-                    cell_fields=config.cell_fields,
-                )
-                writer.write_data(
-                    all_time_values[time_index],
-                    point_data=mesh_at_time.point_data,
-                    cell_data=mesh_at_time.cell_data,
-                )
 
     generated_hdf5_path = Path.cwd() / hdf5_path.name
     if generated_hdf5_path != hdf5_path and generated_hdf5_path.exists():
@@ -185,7 +177,7 @@ def convert_ensight_case(
             "xdmf": str(xdmf_path),
             "hdf5": str(hdf5_path),
         },
-        "time_values": [all_time_values[i] for i in selected_time_indices],
+        "time_values": [all_time_values[i] for i in all_time_indices],
         "point_fields": sorted(mesh.point_data),
         "cell_fields": sorted(mesh.cell_data),
         "mesh": {
@@ -274,6 +266,7 @@ def _dataset_to_meshio(dataset, point_fields=None, cell_fields=None):
     points = np.asarray(dataset.points)
     cells, cell_indices = _extract_meshio_cells(dataset)
 
+    keys = dataset.point_data.keys()
     selected_point_fields = _select_fields(dataset.point_data.keys(), point_fields)
     point_data = {
         name: np.asarray(dataset.point_data[name]) for name in selected_point_fields
