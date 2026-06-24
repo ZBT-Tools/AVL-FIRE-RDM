@@ -53,15 +53,15 @@ def harvest_and_save_data(sftp_client, config):
         )
         
         for asix_path in input_data_paths:
-            # Extract case name from the path (e.g. PEMStar_BekaertPTL.Recalibration_7.Case_2)
-            project_folder = asix_path.split('/')[-3]
-            case_name = project_folder.split('.')[-1]
+            case_name = utils.case_name_from_remote_path(asix_path)
             
             print(f"Processing {case_name}...")
             
             # Setup local directory
-            local_dir = Path("data") / model_name / case_set / case_name
+            local_dir = utils.local_case_dir(model_name, case_set, case_name)
+            local_2d_dir = local_dir / '2d_data'
             local_dir.mkdir(parents=True, exist_ok=True)
+            local_2d_dir.mkdir(parents=True, exist_ok=True)
             
             # --- Process Input Metadata (.asix) ---
             with sftp_client.open(asix_path, 'r') as asix_file:
@@ -80,7 +80,7 @@ def harvest_and_save_data(sftp_client, config):
                 df_2d_renamed, _ = rename_2d_results_columns(df_2d, asix_dict, rules_path)
                 
                 # Save temporarily for downstream steps
-                df_2d_renamed.to_csv(local_dir / 'results_2d.csv', index=False)
+                df_2d_renamed.to_csv(local_2d_dir / 'results_2d.csv', index=False)
             except IOError:
                 print(f"  Warning: Could not find or read results file {results_path}")
 
@@ -92,7 +92,7 @@ def harvest_and_save_data(sftp_client, config):
                 # Save as raw (can be renamed via rules later if needed)
                 # Flattening headers to string for simpler saving
                 df_flc.columns = ['_'.join(col).strip() for col in df_flc.columns.values]
-                df_flc.to_csv(local_dir / 'monitoring_flc.csv', index=False)
+                df_flc.to_csv(local_2d_dir / 'monitoring_flc.csv', index=False)
             except IOError:
                 print(f"  Warning: Could not find or read monitoring file {monitoring_path}")
 

@@ -141,7 +141,7 @@ def convert_ensight_case(
     else:
         selected_time_indices = all_time_indices
 
-    initial_dataset = _read_dataset_at(reader, all_time_indices[0])
+    initial_dataset = _read_dataset_at(reader, selected_time_indices[0])
     mesh, _ = _dataset_to_meshio(
         initial_dataset,
         point_fields=config.point_fields,

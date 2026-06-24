@@ -43,7 +43,7 @@ def plot_polarization_curves(model_name, case_set_names, reference_csv_path):
         
         for case_dir in case_set_dir.iterdir():
             if case_dir.is_dir():
-                res_csv = case_dir / 'results_2d.csv'
+                res_csv = case_dir / '2d_data' / 'results_2d.csv'
                 if res_csv.exists():
                     df = pd.read_csv(res_csv)
                     

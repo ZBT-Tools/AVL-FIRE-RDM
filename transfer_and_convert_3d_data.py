@@ -4,16 +4,16 @@ import argparse
 import json
 import os
 from pathlib import Path
-from pathlib import PurePosixPath
 
 import dotenv
 import paramiko
 
-from src.ensight_to_xdmf import EnsightConversionConfig, convert_ensight_case, inspect_ensight_case
+from src.ensight_to_xdmf import EnsightConversionConfig, convert_ensight_case
 from src import utils
 
 
 DEFAULT_REMOTE_DATA_DIRECTORY = "results/3D_EnSight"
+DEFAULT_LOCAL_3D_DIR = "3d_data"
 DEFAULT_OUTPUT_DIR = "3D_Converted"
 
 
@@ -25,8 +25,15 @@ def main() -> int:
     password = os.getenv("PASSWORD")
     project_directory = os.getenv("PROJECT_DIRECTORY")
     model_name = os.getenv("MODEL_NAME")
-    case_set_name = os.getenv("CASE_SET_NAME")
+    case_set_names = [cs.strip() for cs in os.getenv("CASE_SET_NAME", "").split(",") if cs.strip()]
     case_name = os.getenv("CASE_NAME", default=None)
+    if case_name == "None":
+        case_name = None
+    only_last_time = utils.env_flag(os.getenv("ONLY_LAST_TIME_STEP"), default=True)
+    retrieve_only_last_time = utils.env_flag(
+        os.getenv("RETRIEVE_ONLY_LAST_TIME_STEP"),
+        default=only_last_time,
+    )
     
      # --- SSH Client Initialization ---
     ssh_client = paramiko.SSHClient()
@@ -46,28 +53,41 @@ def main() -> int:
     except paramiko.SSHException as e:
         print(f"Could not establish SSH connection: {e}")
 
-    data_directory = 'results/3D_EnSight'
-    results_3d_data_paths = utils.retrieve_avl_fire_data_paths(
-        sftp_client=sftp_client,
-        project_directory=project_directory,
-        model_name=model_name,
-        case_set_name=case_set_name,
-        data_directory=data_directory,
-    )
-
-    local_ensight_paths = [os.path.join('data', path.split('.')[-1]) for path in results_3d_data_paths]
-    # for i, path in enumerate(results_3d_data_paths):
-    #     utils.sftp_get_dir(sftp_client, path, local_ensight_paths[i])
-
-    local_converted_paths = [os.path.join(os.path.split(path)[0], '3D_Converted') for path in local_ensight_paths]
+    data_directory = DEFAULT_REMOTE_DATA_DIRECTORY
     case_id = model_name + "_DOM_8_0"
-    for i in range(len(local_converted_paths)):    
-        metadata = convert_ensight_case(
-        EnsightConversionConfig(
-            case_file=Path(os.path.join(local_ensight_paths[i], case_id + ".case")),
-            output_dir=Path(local_converted_paths[i]),
-            case_id=case_id,
-            )
+    for case_set_name in case_set_names:
+        results_3d_data_paths = utils.retrieve_avl_fire_data_paths(
+            sftp_client=sftp_client,
+            project_directory=project_directory,
+            model_name=model_name,
+            case_set_name=case_set_name,
+            data_directory=data_directory,
+            case_name=case_name,
         )
+
+        local_ensight_paths: list[Path] = []
+        for path in results_3d_data_paths:
+            current_case_name = utils.case_name_from_remote_path(path)
+            local_case_dir = utils.local_case_dir(model_name, case_set_name, current_case_name)
+            local_ensight_dir = local_case_dir / DEFAULT_LOCAL_3D_DIR
+            utils.sftp_get_ensight_case_dir(
+                sftp_client,
+                path,
+                local_ensight_dir,
+                case_file_name=f"{case_id}.case",
+                only_last_time=retrieve_only_last_time,
+            )
+            local_ensight_paths.append(local_ensight_dir)
+
+        local_converted_paths = [path / DEFAULT_OUTPUT_DIR for path in local_ensight_paths]
+        for i in range(len(local_converted_paths)):
+            metadata = convert_ensight_case(
+                EnsightConversionConfig(
+                    case_file=local_ensight_paths[i] / f"{case_id}.case",
+                    output_dir=local_converted_paths[i],
+                    case_id=case_id,
+                ),
+                only_last_time=only_last_time,
+                )
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -1,14 +1,32 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 import numpy as np
 import pyvista as pv
 import plotly.graph_objects as go
+from dotenv import load_dotenv
 
 
-DEFAULT_XDMF_PATH = Path("3D_Converted") / "fields.xdmf"
+DEFAULT_XDMF_PATH = Path("3d_data") / "3D_Converted" / "fields.xdmf"
+
+
+def load_visualization_config():
+    """Loads the local case selection for visualization from the .env file."""
+    load_dotenv()
+    model_name = os.getenv("MODEL_NAME")
+    case_set_name = os.getenv("CASE_SET_NAME")
+    case_name = os.getenv("CASE_NAME")
+    missing_vars = [name for name, value in {
+        "MODEL_NAME": model_name,
+        "CASE_SET_NAME": case_set_name,
+        "CASE_NAME": case_name,
+    }.items() if not value]
+    if missing_vars:
+        raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+    return model_name, case_set_name, case_name
 
 
 def coerce_unstructured_grid(dataset):
@@ -47,7 +65,8 @@ def main() -> int:
     parser.add_argument("--mode", choices=["3d", "2d"], default="3d")
     args = parser.parse_args()
 
-    xdmf_path = Path('data') / 'Case_6' / 'results' / DEFAULT_XDMF_PATH
+    model_name, case_set_name, case_name = load_visualization_config()
+    xdmf_path = Path("data") / model_name / case_set_name / case_name / DEFAULT_XDMF_PATH
     field = "Flow_Temperature"
     mesh, time_values = load_mesh(xdmf_path, 10)
     pyvista = False
